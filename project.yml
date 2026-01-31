@@ -1,0 +1,63 @@
+name: SuretiShot
+options:
+  bundleIdPrefix: com.suretishot
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "15.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_HARDENED_RUNTIME: YES
+
+targets:
+  SuretiShot:
+    type: application
+    platform: macOS
+    sources:
+      - path: SuretiShot
+        excludes:
+          - "**/*.entitlements"
+          - "**/Info.plist"
+    info:
+      path: SuretiShot/Info.plist
+      properties:
+        LSUIElement: true
+        NSScreenCaptureUsageDescription: "SuretiShot needs screen recording permission to capture screenshots and record your screen."
+        NSMicrophoneUsageDescription: "SuretiShot needs microphone access to record audio with your screen recordings."
+    entitlements:
+      path: SuretiShot/SuretiShot.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.files.bookmarks.app-scope: true
+    settings:
+      base:
+        INFOPLIST_FILE: SuretiShot/Info.plist
+        CODE_SIGN_ENTITLEMENTS: SuretiShot/SuretiShot.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.suretishot.app
+        PRODUCT_NAME: SuretiShot
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        COMBINE_HIDPI_IMAGES: YES
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/../Frameworks"
+
+schemes:
+  SuretiShot:
+    build:
+      targets:
+        SuretiShot: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
