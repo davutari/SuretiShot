@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import AVFoundation
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -170,8 +171,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Save file
             try imageData.write(to: fileURL)
 
-            // Refresh gallery
+            // Play camera shutter sound
+            playShutterSound()
+
+            // Show fly-to-gallery animation
+            await showCaptureAnimation(imageData: imageData)
+
+            // Refresh gallery and open it
             await galleryViewModel.loadItems()
+            openGallery()
 
         } catch CaptureError.cancelled {
             // User cancelled, do nothing
@@ -303,5 +311,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .critical
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    // MARK: - Capture Animation
+
+    private func showCaptureAnimation(imageData: Data) async {
+        guard let image = NSImage(data: imageData) else { return }
+
+        // Get screen frame
+        guard let screen = NSScreen.main else { return }
+        let screenFrame = screen.frame
+
+        // Create thumbnail size (smaller preview)
+        let thumbnailSize = NSSize(width: 200, height: 150)
+
+        // Calculate start position (center of screen)
+        let startX = screenFrame.midX - thumbnailSize.width / 2
+        let startY = screenFrame.midY - thumbnailSize.height / 2
+
+        // Calculate end position (menu bar area - top right)
+        let endX = screenFrame.maxX - thumbnailSize.width - 50
+        let endY = screenFrame.maxY - thumbnailSize.height - 50
+
+        // Create the animation window
+        let animationWindow = NSWindow(
+            contentRect: NSRect(x: startX, y: startY, width: thumbnailSize.width, height: thumbnailSize.height),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+
+        animationWindow.isOpaque = false
+        animationWindow.backgroundColor = .clear
+        animationWindow.level = .floating
+        animationWindow.hasShadow = true
+        animationWindow.ignoresMouseEvents = true
+
+        // Create image view with rounded corners
+        let imageView = NSImageView(frame: NSRect(origin: .zero, size: thumbnailSize))
+        imageView.image = image
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.wantsLayer = true
+        imageView.layer?.cornerRadius = 12
+        imageView.layer?.masksToBounds = true
+        imageView.layer?.borderWidth = 2
+        imageView.layer?.borderColor = NSColor.white.withAlphaComponent(0.8).cgColor
+        imageView.layer?.shadowColor = NSColor.black.cgColor
+        imageView.layer?.shadowOpacity = 0.5
+        imageView.layer?.shadowOffset = CGSize(width: 0, height: -3)
+        imageView.layer?.shadowRadius = 10
+
+        animationWindow.contentView = imageView
+        animationWindow.orderFront(nil)
+
+        // Animate with Core Animation
+        await withCheckedContinuation { continuation in
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.6
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+
+                // Move to top-right and shrink
+                animationWindow.animator().setFrame(
+                    NSRect(x: endX, y: endY, width: thumbnailSize.width * 0.3, height: thumbnailSize.height * 0.3),
+                    display: true
+                )
+                animationWindow.animator().alphaValue = 0.0
+
+            }, completionHandler: {
+                animationWindow.close()
+                continuation.resume()
+            })
+        }
+    }
+
+    // MARK: - Sound Effects
+
+    private func playShutterSound() {
+        // Use macOS system camera shutter sound
+        if let soundURL = URL(string: "/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/Shutter.aif") {
+            // Try system shutter sound first
+            if FileManager.default.fileExists(atPath: soundURL.path) {
+                NSSound(contentsOf: soundURL, byReference: true)?.play()
+                return
+            }
+        }
+
+        // Fallback to system beep sound "Tink" or "Pop"
+        if let sound = NSSound(named: "Tink") {
+            sound.play()
+        } else if let sound = NSSound(named: "Pop") {
+            sound.play()
+        } else {
+            // Ultimate fallback - system beep
+            NSSound.beep()
+        }
     }
 }
