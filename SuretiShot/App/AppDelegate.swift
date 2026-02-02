@@ -68,8 +68,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Setup bindings
         setupBindings()
 
-        // Request permissions
-        _ = await PermissionManager.shared.requestScreenCapturePermission()
+        // Check permissions (only request if not already granted)
+        let hasPermission = await PermissionManager.shared.hasScreenCapturePermission()
+        if !hasPermission {
+            // Only prompt once - user can grant later via Settings
+            _ = await PermissionManager.shared.requestScreenCapturePermission()
+        }
 
         // Restore folder access
         if let url = folderAccessManager.restoreAccess() {
@@ -79,6 +83,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Setup shortcuts
         setupShortcuts()
+        
+        // Listen for app becoming active (user might have changed permissions)
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.settingsViewModel.forceRefreshPermissions()
+            }
+        }
     }
 
     private func setupBindings() {
@@ -132,6 +147,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Capture
 
     private func performCapture(type: CaptureType) async {
+        // First check permissions
+        let hasPermission = await PermissionManager.shared.hasScreenCapturePermission()
+        
+        if !hasPermission {
+            showPermissionAlert()
+            return
+        }
+        
         guard let saveURL = settingsViewModel.selectedFolderURL else {
             showNoFolderAlert()
             return
@@ -140,7 +163,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController?.flashIcon()
 
         do {
-            let imageData = try await captureService.capture(type: type)
+            let captureResult = try await captureService.capture(type: type)
+            let imageData = captureResult.data
 
             // Analyze with AI
             let analysis = await textAnalyzer.analyze(imageData: imageData)
@@ -149,7 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let filename = fileNamingEngine.generateFilename(
                 appName: analysis.appName,
                 hint: analysis.semanticHint,
-                type: .screenshot
+                type: FileMediaType.image
             )
 
             let fileURL = saveURL.appendingPathComponent(filename)
@@ -162,6 +186,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         } catch CaptureError.cancelled {
             // User cancelled, do nothing
+        } catch CaptureError.noPermission {
+            showPermissionAlert()
         } catch {
             showErrorAlert(message: "Capture failed: \(error.localizedDescription)")
         }
@@ -178,6 +204,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startRecording() async {
+        // First check permissions
+        let hasPermission = await PermissionManager.shared.hasScreenCapturePermission()
+        
+        if !hasPermission {
+            showPermissionAlert()
+            return
+        }
+        
         guard let saveURL = settingsViewModel.selectedFolderURL else {
             showNoFolderAlert()
             return
@@ -186,7 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let filename = fileNamingEngine.generateFilename(
             appName: nil,
             hint: .recording,
-            type: .recording
+            type: FileMediaType.video
         )
 
         let fileURL = saveURL.appendingPathComponent(filename)
@@ -194,6 +228,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try await screenRecordingService.startRecording(to: fileURL)
             menuBarController?.setRecordingState(true)
+        } catch RecordingError.noPermission {
+            showPermissionAlert()
         } catch {
             showErrorAlert(message: "Recording failed: \(error.localizedDescription)")
         }
@@ -236,6 +272,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if alert.runModal() == .alertFirstButtonReturn {
             openSettings()
+        }
+    }
+
+    private func showPermissionAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Screen Recording Permission Required"
+        alert.informativeText = "SuretiShot needs screen recording permission to capture screenshots and recordings. Please grant permission in System Settings."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Open System Preferences")
+        alert.addButton(withTitle: "Cancel")
+
+        let response = alert.runModal()
+        
+        switch response {
+        case .alertFirstButtonReturn:
+            // Open app settings
+            openSettings()
+        case .alertSecondButtonReturn:
+            // Open system preferences
+            PermissionManager.shared.openScreenRecordingSettings()
+        default:
+            // Cancel - do nothing
+            break
         }
     }
 

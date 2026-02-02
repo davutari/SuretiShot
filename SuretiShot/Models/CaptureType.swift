@@ -42,6 +42,7 @@ enum CaptureError: Error, LocalizedError {
     case cancelled
     case noDisplay
     case noWindow
+    case captureInProgress
 
     var errorDescription: String? {
         switch self {
@@ -57,6 +58,8 @@ enum CaptureError: Error, LocalizedError {
             return "No display available"
         case .noWindow:
             return "No active window found"
+        case .captureInProgress:
+            return "Another capture is already in progress"
         }
     }
 }
@@ -67,6 +70,8 @@ enum RecordingError: Error, LocalizedError {
     case notRecording
     case setupFailed
     case writeFailed
+    case invalidState
+    case noDisplay
 
     var errorDescription: String? {
         switch self {
@@ -80,6 +85,10 @@ enum RecordingError: Error, LocalizedError {
             return "Failed to setup recording"
         case .writeFailed:
             return "Failed to write recording"
+        case .invalidState:
+            return "Invalid recording state"
+        case .noDisplay:
+            return "No display available for recording"
         }
     }
 }

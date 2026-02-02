@@ -16,6 +16,13 @@ enum Constants {
         static let galleryGridSpacing: CGFloat = 12
     }
 
+    enum CaptureQuality {
+        static let scaleFactors: [Double] = [1.0, 1.5, 2.0, 3.0, 4.0]
+        static let defaultScaleFactor: Double = 2.0
+        static let dpiOptions: [Int] = [72, 144, 216, 288, 300]
+        static let defaultDPI: Int = 144
+    }
+
     enum UserDefaultsKeys {
         static let saveFolderBookmark = "SaveFolderBookmark"
         static let shortcutConfiguration = "ShortcutConfiguration"
@@ -24,6 +31,8 @@ enum Constants {
         static let captureSound = "CaptureSound"
         static let gallerySortOrder = "GallerySortOrder"
         static let galleryFilter = "GalleryFilter"
+        static let captureScaleFactor = "CaptureScaleFactor"
+        static let captureDPI = "CaptureDPI"
     }
 
     enum Animation {
