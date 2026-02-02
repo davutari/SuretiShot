@@ -177,9 +177,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Show fly-to-gallery animation
             await showCaptureAnimation(imageData: imageData)
 
-            // Refresh gallery and open it
+            // Refresh gallery (don't auto-open to avoid menu bar issues)
             await galleryViewModel.loadItems()
-            openGallery()
 
         } catch CaptureError.cancelled {
             // User cancelled, do nothing
@@ -257,7 +256,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             galleryWindowController = GalleryWindowController(viewModel: galleryViewModel)
         }
         galleryWindowController?.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+
+        // For accessory apps, use the modern activate() method
+        NSApp.activate()
     }
 
     private func openSettings() {
@@ -346,6 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         animationWindow.level = .floating
         animationWindow.hasShadow = true
         animationWindow.ignoresMouseEvents = true
+        animationWindow.isReleasedWhenClosed = false  // Prevent app termination
 
         // Create image view with rounded corners
         let imageView = NSImageView(frame: NSRect(origin: .zero, size: thumbnailSize))
@@ -367,7 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Animate with Core Animation
         await withCheckedContinuation { continuation in
             NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.6
+                context.duration = 1.6  // Slower, smoother animation
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
 
                 // Move to top-right and shrink
@@ -378,7 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 animationWindow.animator().alphaValue = 0.0
 
             }, completionHandler: {
-                animationWindow.close()
+                animationWindow.orderOut(nil)  // Hide instead of close to prevent app termination
                 continuation.resume()
             })
         }

@@ -15,7 +15,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         }
         shared?.showWindow(nil)
         shared?.window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+
+        // For accessory apps, use the modern activate() method (macOS 14+)
+        NSApp.activate()
     }
 
     convenience init(settingsViewModel: SettingsViewModel, galleryViewModel: GalleryViewModel) {
