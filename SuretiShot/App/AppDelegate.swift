@@ -68,12 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Setup bindings
         setupBindings()
 
-        // Check permissions (only request if not already granted)
-        let hasPermission = await PermissionManager.shared.hasScreenCapturePermission()
-        if !hasPermission {
-            // Only prompt once - user can grant later via Settings
-            _ = await PermissionManager.shared.requestScreenCapturePermission()
-        }
+        // Don't automatically request permission on startup - let user trigger it
+        // This prevents the aggressive permission dialog
 
         // Restore folder access
         if let url = folderAccessManager.restoreAccess() {
@@ -147,14 +143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Capture
 
     private func performCapture(type: CaptureType) async {
-        // First check permissions
-        let hasPermission = await PermissionManager.shared.hasScreenCapturePermission()
-        
-        if !hasPermission {
-            showPermissionAlert()
-            return
-        }
-        
         guard let saveURL = settingsViewModel.selectedFolderURL else {
             showNoFolderAlert()
             return
@@ -163,6 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController?.flashIcon()
 
         do {
+            // Try capture directly - don't pre-check permission as CGPreflightScreenCaptureAccess is unreliable
             let captureResult = try await captureService.capture(type: type)
             let imageData = captureResult.data
 
@@ -188,8 +177,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // User cancelled, do nothing
         } catch CaptureError.noPermission {
             showPermissionAlert()
+        } catch let error as NSError where error.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain" && error.code == -3801 {
+            // ScreenCaptureKit permission error
+            showPermissionAlert()
         } catch {
-            showErrorAlert(message: "Capture failed: \(error.localizedDescription)")
+            // Check if it's a permission-related error
+            let errorString = error.localizedDescription.lowercased()
+            if errorString.contains("permission") || errorString.contains("denied") || errorString.contains("tcc") {
+                showPermissionAlert()
+            } else {
+                showErrorAlert(message: "Capture failed: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -204,14 +202,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startRecording() async {
-        // First check permissions
-        let hasPermission = await PermissionManager.shared.hasScreenCapturePermission()
-        
-        if !hasPermission {
-            showPermissionAlert()
-            return
-        }
-        
         guard let saveURL = settingsViewModel.selectedFolderURL else {
             showNoFolderAlert()
             return
@@ -230,8 +220,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menuBarController?.setRecordingState(true)
         } catch RecordingError.noPermission {
             showPermissionAlert()
+        } catch let error as NSError where error.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain" && error.code == -3801 {
+            showPermissionAlert()
         } catch {
-            showErrorAlert(message: "Recording failed: \(error.localizedDescription)")
+            let errorString = error.localizedDescription.lowercased()
+            if errorString.contains("permission") || errorString.contains("denied") || errorString.contains("tcc") {
+                showPermissionAlert()
+            } else {
+                showErrorAlert(message: "Recording failed: \(error.localizedDescription)")
+            }
         }
     }
 

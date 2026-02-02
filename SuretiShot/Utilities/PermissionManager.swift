@@ -6,11 +6,14 @@ import AppKit
 final class PermissionManager {
 
     static let shared = PermissionManager()
-    
+
     // Cache permission status to avoid repeated system calls
     private var cachedScreenCapturePermission: Bool?
     private var lastPermissionCheck: Date?
-    private let cacheValidityDuration: TimeInterval = 1.0 // Reduced to 1 second for better responsiveness
+    private let cacheValidityDuration: TimeInterval = 60.0 // Cache for 60 seconds
+
+    // Track if we've already prompted this session
+    private var hasPromptedThisSession = false
 
     private init() {}
 
@@ -18,75 +21,80 @@ final class PermissionManager {
 
     /// Check if screen capture permission is already granted (without prompting)
     func hasScreenCapturePermission() async -> Bool {
-        // Check cache first
+        // Check cache first - use longer cache to avoid repeated checks
         if let cached = cachedScreenCapturePermission,
            let lastCheck = lastPermissionCheck,
            Date().timeIntervalSince(lastCheck) < cacheValidityDuration {
             return cached
         }
-        
+
         // CGPreflightScreenCaptureAccess checks without prompting
         let hasPermission = CGPreflightScreenCaptureAccess()
-        
+
         // Update cache
         cachedScreenCapturePermission = hasPermission
         lastPermissionCheck = Date()
-        
+
         return hasPermission
     }
-    
+
     /// Force refresh the permission status
     func refreshPermissionStatus() async -> Bool {
         cachedScreenCapturePermission = nil
         lastPermissionCheck = nil
-        
-        // Try multiple methods to get accurate permission status
+
+        // Only use CGPreflightScreenCaptureAccess - don't trigger SCShareableContent
+        // as it can cause permission dialogs
         let cgCheck = CGPreflightScreenCaptureAccess()
-        
-        // Also try ScreenCaptureKit check
-        do {
-            _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            // If this succeeds, we definitely have permission
-            cachedScreenCapturePermission = true
-            lastPermissionCheck = Date()
-            return true
-        } catch {
-            // If this fails, rely on CGPreflightScreenCaptureAccess
-            cachedScreenCapturePermission = cgCheck
-            lastPermissionCheck = Date()
-            return cgCheck
-        }
+
+        cachedScreenCapturePermission = cgCheck
+        lastPermissionCheck = Date()
+        return cgCheck
     }
 
     /// Request screen capture permission (will prompt if not granted)
+    /// This should only be called once per app session
     func requestScreenCapturePermission() async -> Bool {
         // First check if already granted
         if CGPreflightScreenCaptureAccess() {
+            cachedScreenCapturePermission = true
+            lastPermissionCheck = Date()
             return true
         }
 
-        // CGRequestScreenCaptureAccess prompts the user ONLY ONCE per session
-        // If already prompted and denied, don't prompt again automatically
-        let hasBeenPrompted = UserDefaults.standard.bool(forKey: "ScreenCapturePermissionPrompted")
-        
-        if hasBeenPrompted {
-            // If we've already prompted and still don't have permission,
-            // direct user to System Preferences instead of prompting again
+        // Don't prompt more than once per session
+        if hasPromptedThisSession {
             return false
         }
-        
-        // Mark that we've prompted
+
+        // Check if we've prompted before and user denied
+        let hasBeenPromptedBefore = UserDefaults.standard.bool(forKey: "ScreenCapturePermissionPrompted")
+
+        if hasBeenPromptedBefore {
+            // Don't prompt again - user needs to grant manually in System Settings
+            return false
+        }
+
+        // Mark that we're prompting
+        hasPromptedThisSession = true
         UserDefaults.standard.set(true, forKey: "ScreenCapturePermissionPrompted")
-        
+
         // CGRequestScreenCaptureAccess prompts the user
         let granted = CGRequestScreenCaptureAccess()
-        
-        // If granted, reset the prompted flag for future sessions
-        if granted {
-            UserDefaults.standard.removeObject(forKey: "ScreenCapturePermissionPrompted")
-        }
-        
+
+        // Update cache
+        cachedScreenCapturePermission = granted
+        lastPermissionCheck = Date()
+
         return granted
+    }
+
+    /// Reset permission prompt flag (call when user manually grants permission)
+    func resetPromptFlag() {
+        hasPromptedThisSession = false
+        UserDefaults.standard.removeObject(forKey: "ScreenCapturePermissionPrompted")
+        cachedScreenCapturePermission = nil
+        lastPermissionCheck = nil
     }
 
     // MARK: - Microphone Permission (for future audio recording)

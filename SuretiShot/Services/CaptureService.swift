@@ -60,13 +60,8 @@ final class CaptureService: NSObject, ObservableObject {
         }
         
         do {
-            // Always check permissions before attempting capture
-            let hasPermission = await PermissionManager.shared.hasScreenCapturePermission()
-            
-            guard hasPermission else {
-                throw CaptureError.noPermission
-            }
-            
+            // Don't pre-check permission - CGPreflightScreenCaptureAccess is unreliable
+            // Instead, let the capture fail naturally and handle the error
             captureProgress = 0.1
             
             let data: Data
@@ -221,19 +216,13 @@ final class CaptureService: NSObject, ObservableObject {
             DispatchQueue.global(qos: .userInitiated).async {
                 let bitmapRep = NSBitmapImageRep(cgImage: image)
 
-                // Set DPI metadata
+                // Set DPI metadata for maximum quality
                 let dpi = CGFloat(self.captureDPI)
                 bitmapRep.setProperty(.init(rawValue: "DPIWidth"), withValue: dpi)
                 bitmapRep.setProperty(.init(rawValue: "DPIHeight"), withValue: dpi)
 
-                // Optimize compression based on image content
-                let compressionFactor = self.imageProcessor.calculateOptimalCompression(for: image)
-                
-                let properties: [NSBitmapImageRep.PropertyKey: Any] = [
-                    .compressionFactor: compressionFactor
-                ]
-
-                let data = bitmapRep.representation(using: .png, properties: properties)
+                // PNG is lossless, no compression factor needed for best quality
+                let data = bitmapRep.representation(using: .png, properties: [:])
                 continuation.resume(returning: data)
             }
         }
@@ -255,12 +244,17 @@ final class CaptureService: NSObject, ObservableObject {
 
         var args = arguments
         args.append(tempURL.path)
-        
+
         // Add performance optimizations
         if options.highPerformance {
             args.append("-C") // Capture cursor
-            args.append("-T") // Capture to TIFF for speed
         }
+
+        // Get user settings
+        let userScaleFactor = UserDefaults.standard.double(forKey: Constants.UserDefaultsKeys.captureScaleFactor)
+        let userDPI = UserDefaults.standard.integer(forKey: Constants.UserDefaultsKeys.captureDPI)
+        let finalScaleFactor = userScaleFactor > 0 ? userScaleFactor : Constants.CaptureQuality.defaultScaleFactor
+        let finalDPI = userDPI > 0 ? userDPI : Constants.CaptureQuality.defaultDPI
 
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -280,15 +274,33 @@ final class CaptureService: NSObject, ObservableObject {
 
                     if FileManager.default.fileExists(atPath: tempURL.path) {
                         do {
-                            let data = try Data(contentsOf: tempURL)
+                            var data = try Data(contentsOf: tempURL)
                             try? FileManager.default.removeItem(at: tempURL)
 
                             if data.count > 100 {
+                                // Apply user's scale factor and DPI settings
+                                if let processedData = self.applyQualitySettings(
+                                    to: data,
+                                    scaleFactor: finalScaleFactor,
+                                    dpi: finalDPI
+                                ) {
+                                    data = processedData
+                                }
+
+                                // Get actual resolution from processed image
+                                var resolution = CGSize.zero
+                                if let imageSource = CGImageSourceCreateWithData(data as CFData, nil),
+                                   let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any],
+                                   let width = properties[kCGImagePropertyPixelWidth as String] as? Int,
+                                   let height = properties[kCGImagePropertyPixelHeight as String] as? Int {
+                                    resolution = CGSize(width: width, height: height)
+                                }
+
                                 let metadata = CaptureMetadata(
                                     captureTime: Date(),
-                                    resolution: CGSize.zero, // Will be calculated from image
-                                    scaleFactor: 1.0,
-                                    dpi: 72,
+                                    resolution: resolution,
+                                    scaleFactor: finalScaleFactor,
+                                    dpi: finalDPI,
                                     display: nil,
                                     captureMethod: .screencapture,
                                     processingTime: endTime - startTime
@@ -315,6 +327,54 @@ final class CaptureService: NSObject, ObservableObject {
                 }
             }
         }
+    }
+
+    /// Apply scale factor and DPI to captured image
+    nonisolated private func applyQualitySettings(to data: Data, scaleFactor: Double, dpi: Int) -> Data? {
+        guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil),
+              let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+            return nil
+        }
+
+        let originalWidth = cgImage.width
+        let originalHeight = cgImage.height
+
+        // Calculate new size based on scale factor
+        let newWidth = Int(Double(originalWidth) * scaleFactor)
+        let newHeight = Int(Double(originalHeight) * scaleFactor)
+
+        // Create scaled image
+        let colorSpace = cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let context = CGContext(
+            data: nil,
+            width: newWidth,
+            height: newHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+
+        // Use high quality interpolation for scaling
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: newWidth, height: newHeight))
+
+        guard let scaledImage = context.makeImage() else {
+            return nil
+        }
+
+        // Convert to PNG with DPI metadata
+        let bitmapRep = NSBitmapImageRep(cgImage: scaledImage)
+
+        // Set DPI
+        let dpiValue = CGFloat(dpi)
+        bitmapRep.setProperty(.init(rawValue: "DPIWidth"), withValue: dpiValue)
+        bitmapRep.setProperty(.init(rawValue: "DPIHeight"), withValue: dpiValue)
+
+        // PNG with no compression for best quality
+        return bitmapRep.representation(using: .png, properties: [:])
     }
     
     // MARK: - Post-Processing
