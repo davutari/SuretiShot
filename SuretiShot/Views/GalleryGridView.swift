@@ -105,6 +105,9 @@ struct MediaItemCell: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
         )
+        .onDrag {
+            NSItemProvider(object: item.url as NSURL)
+        }
         .task(id: item.id) {
             isLoading = true
             thumbnail = await getThumbnail(item)
